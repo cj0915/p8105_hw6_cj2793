@@ -1,0 +1,95 @@
+---
+title: "p8105_hw6_cj2793"
+author: "Chenyu Jin"
+date: "2024-11-20"
+output: github_document
+---
+
+```{r message = FALSE}
+library(tidyverse)
+set.seed(1)
+```
+
+## Problem 2
+
+### 1. Import and clean data
+
+```{r}
+homicide_df = read_csv(file = "data/homicidedata.csv", na = c("Unknown", "NA", "")) |>
+  mutate(reported_date = as.Date(as.character(reported_date), format = "%Y%m%d"))
+```
+
+```{r}
+homicide_df <- homicide_df |>
+  mutate(
+    city_state = str_c(city, state, sep = ", "),
+    solved = if_else(disposition == "Closed by arrest", 1, 0),
+    victim_age = as.numeric(victim_age)
+  ) |>
+  filter(
+    !city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL"),
+    victim_race %in% c("White", "Black")
+  )
+
+```
+
+### 2. logistic regression for Baltimore, MD
+
+```{r}
+baltimore_df <- homicide_df |>
+  filter(city_state == "Baltimore, MD")
+```
+
+```{r}
+logistic_model <- glm(solved ~ victim_age + victim_sex + victim_race, 
+                      data = baltimore_df, family = binomial())
+```
+
+```{r}
+logistic_model |>
+  broom::tidy(conf.int = TRUE) |>
+  filter(term == "victim_sexMale") |>
+  select(term, estimate, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+
+```
+
+### 3. logistic regression for each of the cities
+
+```{r}
+city_models <- homicide_df |>
+  group_by(city_state) |>
+  nest() |>
+  mutate(
+    model = map(data, ~ glm(solved ~ victim_age + victim_sex + victim_race, 
+                            data = ., family = binomial())),
+    results = map(model, ~ broom::tidy(.x, conf.int = TRUE) |>
+                    filter(term == "victim_sexMale") |>
+                    select(term, estimate, conf.low, conf.high))
+  ) |>
+  unnest(results) |>
+  select(city_state, term, estimate, conf.low, conf.high)
+```
+
+```{r}
+city_models |>
+  knitr::kable(digits = 3)
+```
+
+### 4. Create a plot to visualize the ORs and CIs
+
+```{r plot for problem2}
+city_models |>
+  mutate(OR = exp(estimate), conf.low = exp(conf.low), conf.high = exp(conf.high)) |>
+  ggplot(aes(x = reorder(city_state, OR), y = OR)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  labs(
+    title = "Estimated Odds Ratios for Solving Homicides by City",
+    x = "City, State",
+    y = "Odds Ratio (Male vs Female Victims)"
+  ) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+The plot displays the estimated odds ratios (ORs) for solving homicides comparing male victims to female victims across different cities, with corresponding confidence intervals (CIs). Many cities have confidence intervals that cross 1, indicating no significant difference in solving rates between male and female victims. Wide confidence intervals suggest high variability in some cities such as Albuquerque, NM; Stockton, CA; and Fresno, CA.
