@@ -50,11 +50,17 @@ logistic_model <- glm(solved ~ victim_age + victim_sex + victim_race,
 ```{r}
 logistic_model |>
   broom::tidy(conf.int = TRUE) |>
-  filter(term == "victim_sexMale") |>
-  select(term, estimate, conf.low, conf.high) |>
+  filter(term == "victim_sexMale") |> 
+  mutate(
+    OR = exp(estimate),
+    CI_low = exp(conf.low),
+    CI_high = exp(conf.high)
+  ) |> 
+  select(OR, CI_low, CI_high) |> 
   knitr::kable(digits = 3)
-
 ```
+
+The adjusted odds ratio for solving homicides comparing male victims to female victims is 0.426 (CI: 0.324~0.558), keeping all other variables fixed.
 
 ### 3. logistic regression for each of the cities
 
@@ -67,10 +73,15 @@ city_models <- homicide_df |>
                             data = ., family = binomial())),
     results = map(model, ~ broom::tidy(.x, conf.int = TRUE) |>
                     filter(term == "victim_sexMale") |>
-                    select(term, estimate, conf.low, conf.high))
+                    mutate(
+                      OR = exp(estimate),
+                      CI_low = exp(conf.low),
+                      CI_high = exp(conf.high)
+                    ) |>
+                    select(OR, CI_low, CI_high))
   ) |>
   unnest(results) |>
-  select(city_state, term, estimate, conf.low, conf.high)
+  select(city_state, OR, CI_low, CI_high)
 ```
 
 ```{r}
@@ -82,10 +93,9 @@ city_models |>
 
 ```{r plot for problem2}
 city_models |>
-  mutate(OR = exp(estimate), conf.low = exp(conf.low), conf.high = exp(conf.high)) |>
   ggplot(aes(x = reorder(city_state, OR), y = OR)) +
   geom_point() +
-  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  geom_errorbar(aes(ymin = CI_low, ymax = CI_high), width = 0.2) +
   labs(
     title = "Estimated Odds Ratios for Solving Homicides by City",
     x = "City, State",
@@ -105,17 +115,32 @@ birthweight_df <- read_csv("data/birthweightdata.csv")
 ```
 
 ```{r}
-birthweight_df <- birthweight_df |>
+birthweight_df <- birthweight_df  |> 
+  janitor::clean_names() |>
   mutate(
-    babysex = factor(babysex, levels = c(1, 2), labels = c("Male", "Female")),
-    frace = factor(frace, levels = c(1, 2, 3, 4, 8, 9), labels = c("White", "Black", "Asian", "Puerto Rican", "Other", "Unknown")),
-    malform = factor(malform, levels = c(0, 1), labels = c("Absent", "Present")),
-    mrace = factor(mrace, levels = c(1, 2, 3, 4, 8), labels = c("White", "Black", "Asian", "Puerto Rican", "Other")),
-    parity = as.integer(parity),
-    pnumlbw = as.integer(pnumlbw),
-    pnumsga = as.integer(pnumsga),
-    smoken = as.integer(smoken)
-  ) |>
+    babysex = 
+        case_match(babysex,
+            1 ~ "male",
+            2 ~ "female"
+        ),
+    babysex = fct_infreq(babysex),
+    frace = 
+        case_match(frace,
+            1 ~ "white",
+            2 ~ "black", 
+            3 ~ "asian", 
+            4 ~ "puerto rican", 
+            8 ~ "other"),
+    frace = fct_infreq(frace),
+    mrace = 
+        case_match(mrace,
+            1 ~ "white",
+            2 ~ "black", 
+            3 ~ "asian", 
+            4 ~ "puerto rican",
+            8 ~ "other"),
+    mrace = fct_infreq(mrace),
+    malform = as.logical(malform)) |>
   drop_na()
 ```
 
@@ -142,12 +167,16 @@ ggplot(birthweight_df_1, aes(x = pred, y = resid)) +
   theme_minimal()
 ```
 
+The full model for predicting birthweight (bwt) includes a comprehensive set of variables that are believed to influence birthweight based on biological, maternal, and socioeconomic factors. Key predictors include baby characteristics such as sex, head circumference, and length at birth, which directly relate to physical growth. Maternal factors such as weight, height, age, and pre-pregnancy BMI are included because they influence maternal health and fetal growth. Socioeconomic factors like family income and parents' race are added as proxies for access to healthcare and resources, potentially impacting pregnancy outcomes. Pregnancy-specific variables, such as gestational age, parity, weight gain during pregnancy, and smoking behavior, are critical determinants of fetal growth and overall birthweight. Together, these predictors provide a broad and holistic view of factors affecting birthweight, aiming to capture both direct and indirect influences.
+
 ### 3. Cross Validation
 
 ```{r}
 model_1 <- lm(bwt ~ blength + gaweeks, data = birthweight_df)
 
 model_2 <- lm(bwt ~ bhead * blength * babysex, data = birthweight_df)
+
+model_3 <- lm(bwt ~ babysex + bhead + blength + delwt + fincome + frace + gaweeks + malform + menarche + mheight + momage + mrace + parity + pnumlbw + pnumsga + ppbmi + ppwt + smoken + wtgain, data = birthweight_df)
 ```
 
 ```{r plot2 for problem3}
@@ -160,18 +189,18 @@ cv_df <- crossv_mc(birthweight_df, 100) |>
 
 cv_df <- cv_df |>
   mutate(
-    model_full = 
-      map(train, \(df) lm(bwt ~ babysex + bhead + blength + delwt + fincome + frace + gaweeks + malform + menarche + mheight + momage + mrace + parity + pnumlbw + pnumsga + ppbmi + ppwt + smoken + wtgain, data = df)),
     model_1 = 
       map(train, \(df) lm(bwt ~ blength + gaweeks, data = df)),
     model_2 = 
       map(train, \(df) lm(bwt ~ bhead * blength * babysex, data = df)),
-    rmse_model_full = 
-      map2_dbl(model_full, test, \(mod, df) rmse(model = mod, data = df)),
+    model_3 = 
+      map(train, \(df) lm(bwt ~ babysex + bhead + blength + delwt + fincome + frace + gaweeks + malform + menarche + mheight + momage + mrace + parity + pnumlbw + pnumsga + ppbmi + ppwt + smoken + wtgain, data = df)),
     rmse_model_1 = 
       map2_dbl(model_1, test, \(mod, df) rmse(model = mod, data = df)),
     rmse_model_2 = 
-      map2_dbl(model_2, test, \(mod, df) rmse(model = mod, data = df))
+      map2_dbl(model_2, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_model_3 = 
+      map2_dbl(model_3, test, \(mod, df) rmse(model = mod, data = df))
   )
 
 cv_df |> 
@@ -185,3 +214,6 @@ cv_df |>
   ggplot(aes(x = model, y = rmse)) + geom_violin()
 ```
 
+The violin plot shows the distribution of the RMSE (Root Mean Squared Error) for each of the three models based on 100 cross-validation iterations. Model 1, which only includes length at birth and gestational age as predictors, has the largest variability and highest RMSE values, indicating it performs the worst in predicting birthweight among the three models. Model 2, which includes head circumference, length, sex, and their interactions, shows an improvement in prediction accuracy, with lower RMSE values and narrower variability. Model 3, which is the full model incorporating a comprehensive set of predictors including maternal, socioeconomic, and baby characteristics, performs the best with the lowest RMSE and less variability, suggesting that including more relevant features leads to a more accurate prediction of birthweight.
+
+Considering both model simplicity and predictive performance, Model 2 is the best choice. Model 1 has the worst predictive performance, as indicated by the highest RMSE, suggesting it lacks accuracy. While Model 3 offers the best predictive performance with the lowest RMSE, it is highly complex, incorporating many variables, making it difficult to interpret and potentially prone to overfitting. Model 2, on the other hand, strikes a good balance between simplicity and predictive performance. 
