@@ -9,7 +9,76 @@ output: github_document
 library(tidyverse)
 library(modelr)
 library(mgcv)
+library(broom)
 set.seed(1)
+```
+
+## Problem 1
+
+```{r}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
+```{r}
+bootstrap_samples <- modelr::bootstrap(weather_df, 5000)
+```
+
+### Fit linear model and calculate r-squared and log(beta0 * beta1) for each bootstrap sample
+
+```{r}
+bootstrap_results <- bootstrap_samples %>%
+  mutate(
+    model = map(strap, ~ lm(tmax ~ tmin, data = as_tibble(.x))),
+    r_squared = map_dbl(model, ~ broom::glance(.x)[["r.squared"]]),
+    log_coef_product = map_dbl(model, ~ {
+      coef_vals <- broom::tidy(.x) %>% pull(estimate)
+      log(coef_vals[1] * coef_vals[2])
+    })
+  )
+```
+
+### Plot the distribution of r-squared and log(beta0 * beta1)
+
+```{r}
+bootstrap_results %>%
+  ggplot(aes(x = r_squared)) +
+  geom_density(fill = "blue", alpha = 0.5) +
+  labs(title = "Distribution of R-squared from Bootstrap Samples",
+       x = "R-squared",
+       y = "Density") +
+  theme_minimal()
+
+bootstrap_results %>%
+  ggplot(aes(x = log_coef_product)) +
+  geom_density(fill = "green", alpha = 0.5) +
+  labs(title = "Distribution of log(beta0 * beta1) from Bootstrap Samples",
+       x = "log(beta0 * beta1)",
+       y = "Density") +
+  theme_minimal()
+```
+
+The first plot, for R-squared, shows a moderately symmetric distribution concentrated between approximately 0.88 and 0.93, indicating that the model's fit is consistently good across bootstrap samples, with relatively low variability.
+
+The second plot shows the distribution of the log product of β0 and β1. The distribution is also roughly symmetric and is centered around a value slightly above 2.
+
+### Calculate 95% confidence intervals for r-squared and log(beta0 * beta1)
+
+```{r}
+ci_r_squared <- quantile(bootstrap_results %>% pull(r_squared), c(0.025, 0.975))
+ci_log_coef_product <- quantile(bootstrap_results %>% pull(log_coef_product), c(0.025, 0.975))
+
+print(paste("95% CI for R-squared:", ci_r_squared[1], "-", ci_r_squared[2]))
+print(paste("95% CI for log(beta0 * beta1):", ci_log_coef_product[1], "-", ci_log_coef_product[2]))
 ```
 
 ## Problem 2
